@@ -86,7 +86,7 @@
     <h2>🚀 Tối ưu Video Player từ PNG chứa TS</h2>
     
     <div class="controls">
-      <button id="loadBtn">📥 Tải Video</button>
+      <button id="loadBtn">📥 Tải Video (Chậm & Ổn định)</button>
       <button id="pauseBtn" disabled>⏸️ Tạm dừng</button>
       <button id="resumeBtn" disabled>▶️ Tiếp tục</button>
       <button id="clearBtn">🗑️ Xóa cache</button>
@@ -133,9 +133,10 @@
     const BASE_URL = "https://raw.githubusercontent.com/phucphamxuan/video/main/";
     const HEADER_FILE = "header.png";
     const TOTAL_SEGMENTS = 521;
-    const MAX_CONCURRENT = 3; // Giảm concurrent để tránh rate limit
+    const MAX_CONCURRENT = 2; // Chỉ 2 connections đồng thời
     const CHUNK_SIZE = 50; // Xử lý theo batch
-    const RETRY_DELAY = 1000; // Delay giữa các retry
+    const RETRY_DELAY = 2000; // Delay 2s giữa các retry
+    const REQUEST_DELAY = 500; // Delay 500ms giữa mỗi request
 
     // Cache và state management
     let isLoading = false;
@@ -209,24 +210,29 @@
     // Tải segment với retry và timeout
     async function downloadSegment(index, headerSize, retryCount = 0) {
       const filename = `out${index.toString().padStart(3, '0')}.png`;
-      const maxRetries = 3;
+      const maxRetries = 5; // Tăng số lần retry
       
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // Giảm timeout xuống 15s
+        const timeoutId = setTimeout(() => controller.abort(), 20000); // Tăng timeout lên 20s
 
         try {
-          // Thêm delay giữa các retry
+          // Thêm delay giữa các retry và request
           if (attempt > 0) {
-            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
-            log(`🔄 Thử lại ${filename} (lần ${attempt + 1}/${maxRetries + 1})`);
+            const delay = RETRY_DELAY * (attempt + 1); // Delay tăng dần: 2s, 4s, 6s, 8s, 10s
+            await new Promise(resolve => setTimeout(resolve, delay));
+            log(`🔄 Thử lại ${filename} (lần ${attempt + 1}/${maxRetries + 1}) - đợi ${delay/1000}s`);
+          } else {
+            // Delay cơ bản cho mỗi request
+            await new Promise(resolve => setTimeout(resolve, REQUEST_DELAY));
           }
 
           const response = await fetch(BASE_URL + filename, {
             signal: controller.signal,
             headers: {
               'Cache-Control': 'no-cache',
-              'Pragma': 'no-cache'
+              'Pragma': 'no-cache',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             }
           });
           
@@ -248,6 +254,7 @@
           totalDownloaded += buffer.byteLength;
           loadedSegments++;
           
+          log(`✅ Tải thành công ${filename} (${(buffer.byteLength/1024).toFixed(1)}KB)`);
           return new Uint8Array(tsData);
           
         } catch (error) {
@@ -257,7 +264,7 @@
             throw new Error(`${filename}: ${error.message} (sau ${maxRetries + 1} lần thử)`);
           }
           
-          // Log retry
+          // Log retry với chi tiết hơn
           log(`⚠️ Lỗi ${filename} (lần ${attempt + 1}): ${error.message}`, 'warning');
         }
       }
@@ -269,6 +276,7 @@
       let currentIndex = 0;
       let activeDownloads = 0;
       const maxActive = MAX_CONCURRENT;
+      let successCount = 0;
       
       return new Promise((resolve) => {
         async function processNext() {
@@ -280,6 +288,7 @@
           if (currentIndex >= TOTAL_SEGMENTS) {
             // Đợi các downloads còn lại hoàn thành
             if (activeDownloads === 0) {
+              log(`🎯 Hoàn thành tải ${successCount}/${TOTAL_SEGMENTS} segments`);
               resolve(segments.filter(seg => seg !== null));
             }
             return;
@@ -291,6 +300,7 @@
           try {
             const segment = await downloadSegment(index, headerSize);
             segments[index] = segment;
+            successCount++;
             updateProgress();
           } catch (error) {
             log(`❌ Không thể tải segment ${index}: ${error.message}`, 'error');
@@ -301,23 +311,25 @@
           
           activeDownloads--;
           
-          // Tiếp tục tải segment tiếp theo
-          setTimeout(processNext, 100); // Thêm delay nhỏ giữa các request
+          // Thêm delay lớn hơn giữa các batch
+          const nextDelay = Math.min(activeDownloads * 200 + 300, 1000); // 300ms - 1s tùy theo load
+          setTimeout(processNext, nextDelay);
           
-          // Nếu còn slot trống, bắt đầu download khác
+          // Nếu còn slot trống, bắt đầu download khác (với delay)
           if (activeDownloads < maxActive && currentIndex < TOTAL_SEGMENTS) {
-            setTimeout(processNext, 50);
+            setTimeout(processNext, nextDelay + 200);
           }
           
           // Kiểm tra xem đã hoàn thành chưa
           if (currentIndex >= TOTAL_SEGMENTS && activeDownloads === 0) {
+            log(`🎯 Hoàn thành tải ${successCount}/${TOTAL_SEGMENTS} segments`);
             resolve(segments.filter(seg => seg !== null));
           }
         }
         
-        // Khởi động các workers ban đầu
+        // Khởi động các workers ban đầu với delay lớn
         for (let i = 0; i < Math.min(maxActive, TOTAL_SEGMENTS); i++) {
-          setTimeout(() => processNext(), i * 100);
+          setTimeout(() => processNext(), i * 1000); // 1s delay giữa các worker
         }
       });
     }
