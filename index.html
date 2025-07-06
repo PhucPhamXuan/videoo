@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>🚀 Tối ưu Video Player từ PNG chứa TS</title>
+  <title>🎬 Chạy video từ PNG chứa TS - Tối ưu</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -21,33 +21,48 @@
       width: 100%;
       max-width: 640px;
       border-radius: 8px;
+      margin: 15px 0;
+    }
+    .progress-container {
+      margin: 15px 0;
     }
     .progress-bar {
       width: 100%;
-      height: 20px;
+      height: 25px;
       background: #e0e0e0;
-      border-radius: 10px;
+      border-radius: 12px;
       overflow: hidden;
-      margin: 10px 0;
+      position: relative;
     }
     .progress-fill {
       height: 100%;
       background: linear-gradient(45deg, #4CAF50, #2196F3);
       transition: width 0.3s ease;
-      border-radius: 10px;
+      border-radius: 12px;
+    }
+    .progress-text {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-weight: bold;
+      font-size: 12px;
+      text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
     }
     .stats {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
       gap: 10px;
       margin: 15px 0;
     }
     .stat-item {
       background: #f8f9fa;
-      padding: 10px;
+      padding: 8px;
       border-radius: 5px;
       text-align: center;
       border-left: 4px solid #2196F3;
+      font-size: 13px;
     }
     .controls {
       margin: 15px 0;
@@ -56,7 +71,7 @@
       background: #2196F3;
       color: white;
       border: none;
-      padding: 10px 20px;
+      padding: 10px 15px;
       border-radius: 5px;
       cursor: pointer;
       margin-right: 10px;
@@ -75,49 +90,74 @@
       border-radius: 5px;
       font-family: monospace;
       font-size: 12px;
-      max-height: 200px;
+      height: 150px;
       overflow-y: auto;
       border: 1px solid #ddd;
+      white-space: pre-wrap;
+    }
+    .status {
+      font-weight: bold;
+      margin: 10px 0;
+      padding: 10px;
+      border-radius: 5px;
+      text-align: center;
+    }
+    .status.loading {
+      background: #fff3cd;
+      color: #856404;
+    }
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+    }
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h2>🚀 Tối ưu Video Player từ PNG chứa TS</h2>
+    <h2>📦 Convert từ PNG → TS → MP4 và phát (Tối ưu)</h2>
     
     <div class="controls">
-      <button id="loadBtn">📥 Tải Video (Chậm & Ổn định)</button>
+      <button id="startBtn">🚀 Bắt đầu tải</button>
       <button id="pauseBtn" disabled>⏸️ Tạm dừng</button>
       <button id="resumeBtn" disabled>▶️ Tiếp tục</button>
-      <button id="clearBtn">🗑️ Xóa cache</button>
+      <button id="stopBtn" disabled>🛑 Dừng</button>
     </div>
 
-    <div class="progress-bar">
-      <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+    <div class="status" id="status">⏳ Sẵn sàng tải video...</div>
+
+    <div class="progress-container">
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+        <div class="progress-text" id="progressText">0 / 0</div>
+      </div>
     </div>
 
     <div class="stats">
       <div class="stat-item">
-        <strong>Tiến độ</strong><br>
-        <span id="progressText">0/0</span>
-      </div>
-      <div class="stat-item">
         <strong>Tốc độ</strong><br>
-        <span id="speedText">0 MB/s</span>
+        <span id="speedText">0 KB/s</span>
       </div>
       <div class="stat-item">
         <strong>Thời gian</strong><br>
-        <span id="timeText">--:--</span>
+        <span id="timeText">00:00</span>
       </div>
       <div class="stat-item">
-        <strong>Dung lượng</strong><br>
-        <span id="sizeText">0 MB</span>
+        <strong>Thành công</strong><br>
+        <span id="successText">0</span>
+      </div>
+      <div class="stat-item">
+        <strong>Thất bại</strong><br>
+        <span id="failText">0</span>
       </div>
     </div>
 
-    <video id="player" controls style="display: none;"></video>
+    <video id="player" width="640" height="360" controls style="display: none;"></video>
     
-    <div class="log" id="log">📋 Nhật ký hoạt động sẽ hiển thị ở đây...</div>
+    <div class="log" id="log"></div>
   </div>
 
   <!-- ffmpeg.wasm (UMD) -->
@@ -125,374 +165,295 @@
 
   <script>
     const { createFFmpeg, fetchFile } = window.FFmpeg;
-    const ffmpeg = createFFmpeg({ 
-      log: true,
-      corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.10.0/dist/ffmpeg-core.js'
-    });
+    const ffmpeg = createFFmpeg({ log: true });
 
+    // Giữ nguyên các constants từ code gốc
     const BASE_URL = "https://raw.githubusercontent.com/phucphamxuan/video/main/";
     const HEADER_FILE = "header.png";
-    const TOTAL_SEGMENTS = 521;
-    const MAX_CONCURRENT = 2; // Chỉ 2 connections đồng thời
-    const CHUNK_SIZE = 50; // Xử lý theo batch
-    const RETRY_DELAY = 2000; // Delay 2s giữa các retry
-    const REQUEST_DELAY = 500; // Delay 500ms giữa mỗi request
+    const TOTAL_SEGMENTS = 521; // từ out000 → out520
 
-    // Cache và state management
-    let isLoading = false;
-    let shouldPause = false;
-    let loadedSegments = 0;
+    // Tối ưu performance
+    const MAX_CONCURRENT = 3;
+    const REQUEST_DELAY = 300; // ms giữa mỗi request
+    const RETRY_DELAY = 1000; // ms giữa các retry
+    const MAX_RETRIES = 3;
+
+    // State management
+    let isRunning = false;
+    let isPaused = false;
+    let shouldStop = false;
+    let currentIndex = 0;
+    let successCount = 0;
+    let failCount = 0;
     let startTime = 0;
-    let totalDownloaded = 0;
-    
-    // Elements
+    let totalBytes = 0;
+    let headerSize = 0;
+    let tsParts = [];
+
+    // DOM elements
     const elements = {
-      log: document.getElementById("log"),
-      video: document.getElementById("player"),
-      progressFill: document.getElementById("progressFill"),
-      progressText: document.getElementById("progressText"),
-      speedText: document.getElementById("speedText"),
-      timeText: document.getElementById("timeText"),
-      sizeText: document.getElementById("sizeText"),
-      loadBtn: document.getElementById("loadBtn"),
-      pauseBtn: document.getElementById("pauseBtn"),
-      resumeBtn: document.getElementById("resumeBtn"),
-      clearBtn: document.getElementById("clearBtn")
+      log: document.getElementById('log'),
+      video: document.getElementById('player'),
+      status: document.getElementById('status'),
+      progressFill: document.getElementById('progressFill'),
+      progressText: document.getElementById('progressText'),
+      speedText: document.getElementById('speedText'),
+      timeText: document.getElementById('timeText'),
+      successText: document.getElementById('successText'),
+      failText: document.getElementById('failText'),
+      startBtn: document.getElementById('startBtn'),
+      pauseBtn: document.getElementById('pauseBtn'),
+      resumeBtn: document.getElementById('resumeBtn'),
+      stopBtn: document.getElementById('stopBtn')
     };
 
-    // Logging với timestamp
-    function log(message, type = 'info') {
+    // Logging function
+    function log(message) {
       const timestamp = new Date().toLocaleTimeString();
-      const logEntry = `[${timestamp}] ${message}`;
-      elements.log.innerHTML += logEntry + '\n';
+      const logEntry = `[${timestamp}] ${message}\n`;
+      elements.log.textContent += logEntry;
       elements.log.scrollTop = elements.log.scrollHeight;
-      console.log(logEntry);
+      console.log(message);
     }
 
-    // Cập nhật progress
-    function updateProgress() {
-      const progress = (loadedSegments / TOTAL_SEGMENTS) * 100;
+    // Update UI
+    function updateUI() {
+      const progress = TOTAL_SEGMENTS > 0 ? (currentIndex / TOTAL_SEGMENTS) * 100 : 0;
       elements.progressFill.style.width = progress + '%';
-      elements.progressText.textContent = `${loadedSegments}/${TOTAL_SEGMENTS}`;
-      
-      // Tính tốc độ
+      elements.progressText.textContent = `${currentIndex} / ${TOTAL_SEGMENTS}`;
+      elements.successText.textContent = successCount;
+      elements.failText.textContent = failCount;
+
+      // Calculate speed and time
       const elapsed = (Date.now() - startTime) / 1000;
-      const speed = elapsed > 0 ? (totalDownloaded / elapsed / 1024 / 1024).toFixed(2) : 0;
-      elements.speedText.textContent = `${speed} MB/s`;
+      const speed = elapsed > 0 ? (totalBytes / elapsed / 1024).toFixed(1) : 0;
+      elements.speedText.textContent = `${speed} KB/s`;
       
-      // Thời gian đã trôi qua
       const minutes = Math.floor(elapsed / 60);
       const seconds = Math.floor(elapsed % 60);
-      elements.timeText.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-      
-      // Dung lượng
-      elements.sizeText.textContent = `${(totalDownloaded / 1024 / 1024).toFixed(2)} MB`;
+      elements.timeText.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     }
 
-    // Tải header với retry
-    async function loadHeader() {
-      for (let retry = 0; retry < 3; retry++) {
-        try {
-          log(`📥 Tải header... (lần thử ${retry + 1})`);
-          const response = await fetch(BASE_URL + HEADER_FILE);
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const buffer = await response.arrayBuffer();
-          log(`✅ Header tải thành công (${buffer.byteLength} bytes)`);
-          return buffer;
-        } catch (error) {
-          log(`❌ Lỗi tải header (lần ${retry + 1}): ${error.message}`, 'error');
-          if (retry === 2) throw error;
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
+    // Set status
+    function setStatus(message, type = 'loading') {
+      elements.status.textContent = message;
+      elements.status.className = `status ${type}`;
     }
 
-    // Tải segment với retry và timeout
-    async function downloadSegment(index, headerSize, retryCount = 0) {
-      const filename = `out${index.toString().padStart(3, '0')}.png`;
-      const maxRetries = 5; // Tăng số lần retry
-      
-      for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 20000); // Tăng timeout lên 20s
-
-        try {
-          // Thêm delay giữa các retry và request
-          if (attempt > 0) {
-            const delay = RETRY_DELAY * (attempt + 1); // Delay tăng dần: 2s, 4s, 6s, 8s, 10s
-            await new Promise(resolve => setTimeout(resolve, delay));
-            log(`🔄 Thử lại ${filename} (lần ${attempt + 1}/${maxRetries + 1}) - đợi ${delay/1000}s`);
-          } else {
-            // Delay cơ bản cho mỗi request
-            await new Promise(resolve => setTimeout(resolve, REQUEST_DELAY));
-          }
-
-          const response = await fetch(BASE_URL + filename, {
-            signal: controller.signal,
-            headers: {
-              'Cache-Control': 'no-cache',
-              'Pragma': 'no-cache',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-          });
-          
-          clearTimeout(timeoutId);
-          
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          
-          const buffer = await response.arrayBuffer();
-          
-          // Kiểm tra kích thước file
-          if (buffer.byteLength <= headerSize) {
-            throw new Error(`File quá nhỏ (${buffer.byteLength} bytes)`);
-          }
-          
-          const tsData = buffer.slice(headerSize);
-          
-          totalDownloaded += buffer.byteLength;
-          loadedSegments++;
-          
-          log(`✅ Tải thành công ${filename} (${(buffer.byteLength/1024).toFixed(1)}KB)`);
-          return new Uint8Array(tsData);
-          
-        } catch (error) {
-          clearTimeout(timeoutId);
-          
-          if (attempt === maxRetries) {
-            throw new Error(`${filename}: ${error.message} (sau ${maxRetries + 1} lần thử)`);
-          }
-          
-          // Log retry với chi tiết hơn
-          log(`⚠️ Lỗi ${filename} (lần ${attempt + 1}): ${error.message}`, 'warning');
-        }
-      }
-    }
-
-    // Tải segments theo batch với concurrency limit
-    async function downloadSegmentsBatch(headerSize) {
-      const segments = new Array(TOTAL_SEGMENTS).fill(null);
-      let currentIndex = 0;
-      let activeDownloads = 0;
-      const maxActive = MAX_CONCURRENT;
-      let successCount = 0;
-      
-      return new Promise((resolve) => {
-        async function processNext() {
-          if (shouldPause) {
-            log('⏸️ Tải đã bị tạm dừng');
-            return;
-          }
-          
-          if (currentIndex >= TOTAL_SEGMENTS) {
-            // Đợi các downloads còn lại hoàn thành
-            if (activeDownloads === 0) {
-              log(`🎯 Hoàn thành tải ${successCount}/${TOTAL_SEGMENTS} segments`);
-              resolve(segments.filter(seg => seg !== null));
-            }
-            return;
-          }
-          
-          const index = currentIndex++;
-          activeDownloads++;
-          
-          try {
-            const segment = await downloadSegment(index, headerSize);
-            segments[index] = segment;
-            successCount++;
-            updateProgress();
-          } catch (error) {
-            log(`❌ Không thể tải segment ${index}: ${error.message}`, 'error');
-            // Vẫn tăng loadedSegments để không bị stuck
-            loadedSegments++;
-            updateProgress();
-          }
-          
-          activeDownloads--;
-          
-          // Thêm delay lớn hơn giữa các batch
-          const nextDelay = Math.min(activeDownloads * 200 + 300, 1000); // 300ms - 1s tùy theo load
-          setTimeout(processNext, nextDelay);
-          
-          // Nếu còn slot trống, bắt đầu download khác (với delay)
-          if (activeDownloads < maxActive && currentIndex < TOTAL_SEGMENTS) {
-            setTimeout(processNext, nextDelay + 200);
-          }
-          
-          // Kiểm tra xem đã hoàn thành chưa
-          if (currentIndex >= TOTAL_SEGMENTS && activeDownloads === 0) {
-            log(`🎯 Hoàn thành tải ${successCount}/${TOTAL_SEGMENTS} segments`);
-            resolve(segments.filter(seg => seg !== null));
-          }
-        }
-        
-        // Khởi động các workers ban đầu với delay lớn
-        for (let i = 0; i < Math.min(maxActive, TOTAL_SEGMENTS); i++) {
-          setTimeout(() => processNext(), i * 1000); // 1s delay giữa các worker
-        }
-      });
-    }
-
-    // Ghép segments thành TS
-    function combineSegments(segments) {
-      log('🔗 Đang ghép các segments...');
-      const totalLength = segments.reduce((sum, seg) => sum + seg.length, 0);
-      const combined = new Uint8Array(totalLength);
-      
-      let offset = 0;
-      for (const segment of segments) {
-        combined.set(segment, offset);
-        offset += segment.length;
-      }
-      
-      log(`✅ Ghép hoàn thành: ${(totalLength / 1024 / 1024).toFixed(2)} MB`);
-      return combined;
-    }
-
-    // Convert TS to MP4
-    async function convertToMP4(tsData) {
-      log('🧠 Đang load ffmpeg...');
-      
-      if (!ffmpeg.isLoaded()) {
-        await ffmpeg.load();
-      }
-      
-      log('📝 Ghi file input.ts vào FS ảo...');
-      ffmpeg.FS('writeFile', 'input.ts', tsData);
-      
-      log('🔄 Chuyển TS → MP4...');
-      await ffmpeg.run(
-        '-i', 'input.ts',
-        '-c:v', 'copy',
-        '-c:a', 'aac',
-        '-bsf:a', 'aac_adtstoasc',
-        '-f', 'mp4',
-        '-movflags', 'frag_keyframe+empty_moov',
-        'output.mp4'
-      );
-      
-      log('📤 Đọc file output.mp4');
-      const mp4Data = ffmpeg.FS('readFile', 'output.mp4');
-      
-      // Dọn dẹp
-      ffmpeg.FS('unlink', 'input.ts');
-      ffmpeg.FS('unlink', 'output.mp4');
-      
-      return mp4Data;
-    }
-
-    // Main loading function
-    async function loadVideo() {
-      if (isLoading) return;
-      
-      isLoading = true;
-      shouldPause = false;
-      loadedSegments = 0;
-      totalDownloaded = 0;
-      startTime = Date.now();
-      
-      elements.loadBtn.disabled = true;
-      elements.pauseBtn.disabled = false;
-      elements.resumeBtn.disabled = true;
-      elements.video.style.display = 'none';
+    // Download and extract TS - giữ nguyên logic gốc
+    async function downloadAndExtractTS(segmentIndex, headerSize, retryCount = 0) {
+      const filename = `out${segmentIndex.toString().padStart(3, '0')}.png`;
       
       try {
-        // Load header
-        const headerBuffer = await loadHeader();
-        const headerSize = headerBuffer.byteLength;
+        const res = await fetch(BASE_URL + filename);
+        if (!res.ok) throw new Error(`❌ Lỗi tải ${filename} - HTTP ${res.status}`);
         
-        // Load segments
-        log('📦 Bắt đầu tải segments...');
-        const segments = await downloadSegmentsBatch(headerSize);
+        const buf = await res.arrayBuffer();
+        totalBytes += buf.byteLength;
         
-        if (shouldPause) {
-          log('⏸️ Đã tạm dừng');
+        return buf.slice(headerSize);
+      } catch (error) {
+        if (retryCount < MAX_RETRIES) {
+          log(`⚠️ Retry ${filename} (lần ${retryCount + 1})`);
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+          return downloadAndExtractTS(segmentIndex, headerSize, retryCount + 1);
+        }
+        throw error;
+      }
+    }
+
+    // Download segments with concurrency control
+    async function downloadSegments() {
+      const semaphore = new Array(MAX_CONCURRENT).fill(true);
+      const promises = [];
+
+      for (let i = 0; i < TOTAL_SEGMENTS; i++) {
+        if (shouldStop) break;
+
+        const promise = (async (index) => {
+          // Wait for semaphore
+          while (semaphore.every(slot => !slot)) {
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+          
+          const semaphoreIndex = semaphore.findIndex(slot => slot);
+          semaphore[semaphoreIndex] = false;
+
+          try {
+            // Wait if paused
+            while (isPaused && !shouldStop) {
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
+
+            if (shouldStop) return;
+
+            // Add delay between requests
+            await new Promise(resolve => setTimeout(resolve, REQUEST_DELAY));
+
+            const ts = await downloadAndExtractTS(index, headerSize);
+            tsParts[index] = new Uint8Array(ts);
+            successCount++;
+            currentIndex = Math.max(currentIndex, index + 1);
+            
+            log(`✅ Tải thành công ${index.toString().padStart(3, '0')}.png`);
+          } catch (error) {
+            log(`❌ Thất bại ${index.toString().padStart(3, '0')}.png: ${error.message}`);
+            failCount++;
+            currentIndex = Math.max(currentIndex, index + 1);
+          } finally {
+            semaphore[semaphoreIndex] = true;
+            updateUI();
+          }
+        })(i);
+
+        promises.push(promise);
+      }
+
+      await Promise.all(promises);
+    }
+
+    // Main function - giữ nguyên logic gốc
+    async function main() {
+      if (isRunning) return;
+      
+      isRunning = true;
+      shouldStop = false;
+      isPaused = false;
+      currentIndex = 0;
+      successCount = 0;
+      failCount = 0;
+      totalBytes = 0;
+      tsParts = new Array(TOTAL_SEGMENTS);
+      startTime = Date.now();
+
+      elements.startBtn.disabled = true;
+      elements.pauseBtn.disabled = false;
+      elements.stopBtn.disabled = false;
+      elements.video.style.display = 'none';
+
+      try {
+        setStatus("📥 Đang tải header...", 'loading');
+        log("📥 Tải header...");
+        
+        // Load header - giữ nguyên logic gốc
+        const headerRes = await fetch(BASE_URL + HEADER_FILE);
+        if (!headerRes.ok) throw new Error(`Lỗi tải header: HTTP ${headerRes.status}`);
+        
+        const headerBuf = await headerRes.arrayBuffer();
+        headerSize = headerBuf.byteLength;
+        log(`📏 HEADER_SIZE = ${headerSize}`);
+
+        if (shouldStop) return;
+
+        // Download all segments
+        setStatus("📦 Đang tải segments...", 'loading');
+        log("📦 Bắt đầu tải segments...");
+        
+        await downloadSegments();
+
+        if (shouldStop) {
+          setStatus("🛑 Đã dừng", 'error');
           return;
         }
+
+        // Combine segments - giữ nguyên logic gốc
+        setStatus("🔗 Đang ghép segments...", 'loading');
+        log("🔗 Đang ghép segments...");
         
-        // Combine segments
-        const combinedTS = combineSegments(segments);
+        const validParts = tsParts.filter(part => part !== undefined);
+        const totalLength = validParts.reduce((sum, part) => sum + part.length, 0);
+        const combined = new Uint8Array(totalLength);
         
-        // Convert to MP4
-        const mp4Data = await convertToMP4(combinedTS);
+        let offset = 0;
+        for (const part of validParts) {
+          combined.set(part, offset);
+          offset += part.length;
+        }
+
+        log(`✅ Ghép hoàn thành: ${validParts.length} segments, ${(totalLength / 1024 / 1024).toFixed(2)} MB`);
+
+        // FFmpeg processing - giữ nguyên logic gốc
+        setStatus("🧠 Đang load ffmpeg...", 'loading');
+        log("🧠 Đang load ffmpeg...");
         
-        // Create video URL
+        if (!ffmpeg.isLoaded()) {
+          await ffmpeg.load();
+        }
+
+        setStatus("📝 Đang xử lý video...", 'loading');
+        log("📝 Ghi file input.ts vào FS ảo...");
+        ffmpeg.FS('writeFile', 'input.ts', combined);
+
+        log("🔄 Chuyển TS → MP4...");
+        await ffmpeg.run(
+          '-i', 'input.ts',
+          '-c:v', 'copy',
+          '-c:a', 'aac',
+          '-bsf:a', 'aac_adtstoasc',
+          '-f', 'mp4',
+          '-movflags', 'frag_keyframe+empty_moov',
+          'output.mp4'
+        );
+
+        log("📤 Đọc file output.mp4");
+        const mp4Data = ffmpeg.FS('readFile', 'output.mp4');
         const blob = new Blob([mp4Data.buffer], { type: 'video/mp4' });
         const url = URL.createObjectURL(blob);
-        
+
         elements.video.src = url;
         elements.video.style.display = 'block';
         
-        log('✅ Video đã sẵn sàng để phát!');
-        
+        setStatus("✅ Phát video thành công!", 'success');
+        log("✅ Phát video thành công!");
+
+        // Cleanup
+        try {
+          ffmpeg.FS('unlink', 'input.ts');
+          ffmpeg.FS('unlink', 'output.mp4');
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+
       } catch (error) {
-        log(`❌ Lỗi: ${error.message}`, 'error');
+        setStatus(`❌ Lỗi: ${error.message}`, 'error');
+        log(`❌ Lỗi: ${error.message}`);
       } finally {
-        isLoading = false;
-        elements.loadBtn.disabled = false;
+        isRunning = false;
+        elements.startBtn.disabled = false;
         elements.pauseBtn.disabled = true;
         elements.resumeBtn.disabled = true;
+        elements.stopBtn.disabled = true;
       }
     }
 
     // Event listeners
-    elements.loadBtn.addEventListener('click', loadVideo);
+    elements.startBtn.addEventListener('click', main);
     
     elements.pauseBtn.addEventListener('click', () => {
-      shouldPause = true;
+      isPaused = true;
       elements.pauseBtn.disabled = true;
       elements.resumeBtn.disabled = false;
-      log('⏸️ Đã tạm dừng tải');
+      setStatus("⏸️ Đã tạm dừng", 'loading');
+      log("⏸️ Đã tạm dừng");
     });
-    
+
     elements.resumeBtn.addEventListener('click', () => {
-      shouldPause = false;
+      isPaused = false;
       elements.pauseBtn.disabled = false;
       elements.resumeBtn.disabled = true;
-      log('▶️ Tiếp tục tải');
-    });
-    
-    elements.clearBtn.addEventListener('click', () => {
-      // Reset tất cả
-      elements.video.src = '';
-      elements.video.style.display = 'none';
-      elements.log.innerHTML = '📋 Đã xóa cache và reset...\n';
-      elements.progressFill.style.width = '0%';
-      elements.progressText.textContent = '0/0';
-      elements.speedText.textContent = '0 MB/s';
-      elements.timeText.textContent = '--:--';
-      elements.sizeText.textContent = '0 MB';
-      
-      // Clear URL objects
-      if (elements.video.src) {
-        URL.revokeObjectURL(elements.video.src);
-      }
+      setStatus("▶️ Đã tiếp tục", 'loading');
+      log("▶️ Đã tiếp tục");
     });
 
-    // Tự động bắt đầu kiểm tra kết nối
-    async function checkConnection() {
-      try {
-        log('🔍 Kiểm tra kết nối đến server...');
-        const response = await fetch(BASE_URL + HEADER_FILE, { 
-          method: 'HEAD',
-          cache: 'no-cache'
-        });
-        
-        if (response.ok) {
-          log('✅ Kết nối server thành công!');
-          log('🚀 Sẵn sàng tải video. Nhấn "Tải Video" để bắt đầu.');
-        } else {
-          log('⚠️ Server phản hồi không ổn định. Có thể gặp lỗi khi tải.');
-        }
-      } catch (error) {
-        log('❌ Không thể kết nối đến server. Kiểm tra internet hoặc server có thể đang bảo trì.');
-        log(`Chi tiết lỗi: ${error.message}`);
-      }
-    }
+    elements.stopBtn.addEventListener('click', () => {
+      shouldStop = true;
+      isPaused = false;
+      setStatus("🛑 Đang dừng...", 'loading');
+      log("🛑 Đang dừng...");
+    });
 
-    // Chạy kiểm tra kết nối khi load trang
-    checkConnection();
+    // Initialize
+    log("🚀 Sẵn sàng! Nhấn 'Bắt đầu tải' để tải video.");
   </script>
 </body>
 </html>
