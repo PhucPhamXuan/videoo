@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>🚀 Ultra Fast Video Player</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #000;
+      color: #fff;
+      overflow: hidden;
+      touch-action: manipulation;
+    }
+    
+    .player-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .video-wrapper {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      max-width: 1920px;
+      max-height: 1080px;
+    }
+    
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+    }
+    
+    .loading-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      backdrop-filter: blur(15px);
+    }
+    
+    .play-button {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      background: linear-gradient(45deg, #ff0050, #ff6b00);
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      margin-bottom: 30px;
+      box-shadow: 0 10px 30px rgba(255, 0, 80, 0.3);
+    }
+    
+    .play-button:hover {
+      transform: scale(1.1);
+      box-shadow: 0 15px 40px rgba(255, 0, 80, 0.5);
+    }
+    
+    .play-button:active {
+      transform: scale(0.95);
+    }
+    
+    .play-button svg {
+      width: 45px;
+      height: 45px;
+      fill: white;
+      margin-left: 8px;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+    }
+    
+    .loading-spinner {
+      width: 80px;
+      height: 80px;
+      border: 6px solid rgba(255, 255, 255, 0.1);
+      border-top: 6px solid #ff0050;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 25px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .loading-text {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 20px;
+      text-align: center;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+    }
+    
+    .progress-bar {
+      width: min(500px, 80vw);
+      height: 8px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 15px;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #ff0050, #ff6b00, #00ff88);
+      transition: width 0.2s ease;
+      border-radius: 4px;
+      box-shadow: 0 0 20px rgba(255, 0, 80, 0.5);
+    }
+    
+    .progress-text {
+      font-size: 16px;
+      color: rgba(255, 255, 255, 0.9);
+      text-align: center;
+      font-weight: 500;
+    }
+    
+    .stats-container {
+      display: flex;
+      gap: 20px;
+      margin-top: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    
+    .stat-item {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 14px;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    
+    .buffer-indicator {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 10px 16px;
+      border-radius: 25px;
+      font-size: 14px;
+      backdrop-filter: blur(10px);
+      z-index: 200;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      transition: all 0.3s ease;
+    }
+    
+    .buffer-indicator.ready {
+      background: rgba(0, 200, 0, 0.8);
+      border-color: rgba(0, 255, 0, 0.5);
+      box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
+    }
+    
+    .error-message {
+      color: #ff4444;
+      font-size: 18px;
+      text-align: center;
+      margin-top: 20px;
+      padding: 20px;
+      background: rgba(255, 68, 68, 0.1);
+      border-radius: 12px;
+      border: 2px solid rgba(255, 68, 68, 0.3);
+      backdrop-filter: blur(10px);
+    }
+    
+    .video-title {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      font-size: 28px;
+      font-weight: 700;
+      z-index: 200;
+      text-shadow: 0 3px 6px rgba(0, 0, 0, 0.8);
+      background: linear-gradient(45deg, #ff0050, #ff6b00);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    
+    .speed-indicator {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 14px;
+      backdrop-filter: blur(10px);
+      z-index: 200;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      font-weight: 600;
+    }
+    
+    .controls-overlay {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(transparent, rgba(0, 0, 0, 0.9));
+      padding: 80px 20px 20px;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      z-index: 150;
+    }
+    
+    .player-container:hover .controls-overlay,
+    .player-container.show-controls .controls-overlay {
+      opacity: 1;
+    }
+    
+    .control-buttons {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    
+    .control-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: white;
+      cursor: pointer;
+      padding: 12px;
+      border-radius: 50%;
+      transition: all 0.3s ease;
+      backdrop-filter: blur(10px);
+    }
+    
+    .control-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+      transform: scale(1.1);
+    }
+    
+    .control-btn:active {
+      transform: scale(0.9);
+    }
+    
+    .control-btn svg {
+      width: 24px;
+      height: 24px;
+      fill: currentColor;
+    }
+    
+    .time-display {
+      font-size: 16px;
+      color: rgba(255, 255, 255, 0.9);
+      margin-left: auto;
+      font-weight: 500;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    }
+    
+    .video-progress {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 3px;
+      cursor: pointer;
+      position: relative;
+      transition: height 0.2s ease;
+    }
+    
+    .video-progress:hover {
+      height: 8px;
+    }
+    
+    .video-progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #ff0050, #ff6b00);
+      border-radius: 3px;
+      transition: width 0.1s ease;
+      box-shadow: 0 0 10px rgba(255, 0, 80, 0.5);
+    }
+    
+    .buffer-progress {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.4);
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+    
+    .hidden {
+      display: none !important;
+    }
+    
+    .performance-overlay {
+      position: absolute;
+      top: 80px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 10px 15px;
+      border-radius: 8px;
+      font-size: 12px;
+      backdrop-filter: blur(10px);
+      z-index: 200;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    
+    /* Mobile optimizations */
+    @media (max-width: 768px) {
+      .video-title {
+        font-size: 24px;
+      }
+      
+      .play-button {
+        width: 100px;
+        height: 100px;
+      }
+      
+      .play-button svg {
+        width: 40px;
+        height: 40px;
+      }
+      
+      .loading-text {
+        font-size: 18px;
+      }
+      
+      .progress-bar {
+        width: 90vw;
+      }
+      
+      .stats-container {
+        gap: 10px;
+      }
+      
+      .stat-item {
+        padding: 6px 12px;
+        font-size: 12px;
+      }
+      
+      .controls-overlay {
+        padding: 60px 15px 15px;
+      }
+      
+      .control-buttons {
+        gap: 15px;
+      }
+      
+      .control-btn {
+        padding: 10px;
+      }
+      
+      .control-btn svg {
+        width: 20px;
+        height: 20px;
+      }
+      
+      .time-display {
+        font-size: 14px;
+      }
+      
+      .buffer-indicator,
+      .speed-indicator {
+        font-size: 12px;
+        padding: 6px 12px;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      .video-title {
+        font-size: 20px;
+      }
+      
+      .play-button {
+        width: 80px;
+        height: 80px;
+      }
+      
+      .play-button svg {
+        width: 32px;
+        height: 32px;
+      }
+      
+      .loading-spinner {
+        width: 60px;
+        height: 60px;
+      }
+      
+      .loading-text {
+        font-size: 16px;
+      }
+    }
+    
+    /* Smooth animations */
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    
+    .loading-content {
+      animation: pulse 2s ease-in-out infinite;
+    }
+    
+    .buffering .loading-spinner {
+      animation: spin 0.6s linear infinite;
+    }
+  </style>
+</head>
+<body>
+  <div class="player-container" id="playerContainer">
+    <div class="video-title">🚀 Ultra Fast Player</div>
+    
+    <div class="buffer-indicator" id="bufferIndicator">
+      Sẵn sàng
+    </div>
+    
+    <div class="speed-indicator" id="speedIndicator">
+      0 Mbps
+    </div>
+    
+    <div class="performance-overlay" id="performanceOverlay">
+      <div>CPU: <span id="cpuUsage">0%</span></div>
+      <div>Memory: <span id="memoryUsage">0 MB</span></div>
+      <div>FPS: <span id="frameRate">0</span></div>
+    </div>
+    
+    <div class="video-wrapper">
+      <video id="videoPlayer" 
+             preload="none" 
+             playsinline 
+             webkit-playsinline 
+             controls="false"
+             poster="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzAwMCIvPjx0ZXh0IHg9IjUwIiB5PSI1MCIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjE0IiBmaWxsPSIjZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+VmlkZW88L3RleHQ+PC9zdmc+">
+      </video>
+      
+      <div class="loading-overlay" id="loadingOverlay">
+        <div class="play-button" id="playButton">
+          <svg viewBox="0 0 24 24">
+            <path d="M8 5v14l11-7z"/>
+          </svg>
+        </div>
+        
+        <div class="loading-content" id="loadingContent" style="display: none;">
+          <div class="loading-spinner"></div>
+          <div class="loading-text" id="loadingText">Đang tải siêu nhanh...</div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+          </div>
+          <div class="progress-text" id="progressText">0%</div>
+          
+          <div class="stats-container">
+            <div class="stat-item" id="speedStat">0 Mbps</div>
+            <div class="stat-item" id="bufferStat">0/521</div>
+            <div class="stat-item" id="timeStat">00:00</div>
+          </div>
+        </div>
+        
+        <div class="error-message hidden" id="errorMessage">
+          Có lỗi xảy ra khi tải video. Vui lòng thử lại.
+        </div>
+      </div>
+      
+      <div class="controls-overlay">
+        <div class="control-buttons">
+          <button class="control-btn" id="playPauseBtn">
+            <svg viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+          </button>
+          
+          <button class="control-btn" id="muteBtn">
+            <svg viewBox="0 0 24 24">
+              <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+            </svg>
+          </button>
+          
+          <button class="control-btn" id="fullscreenBtn">
+            <svg viewBox="0 0 24 24">
+              <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+            </svg>
+          </button>
+          
+          <div class="time-display" id="timeDisplay">
+            00:00 / 00:00
+          </div>
+        </div>
+        
+        <div class="video-progress" id="videoProgress">
+          <div class="buffer-progress" id="bufferProgress"></div>
+          <div class="video-progress-fill" id="videoProgressFill"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js"></script>
+  <script>
+    const { createFFmpeg, fetchFile } = window.FFmpeg;
+    
+    // FFmpeg instance
+    const ffmpeg = createFFmpeg({ 
+      log: false,
+      corePath: 'https://unpkg.com/@ffmpeg/core@0.10.0/dist/ffmpeg-core.js'
+    });
+
+    // Ultra-fast configuration for 300Mbps+
+    const CONFIG = {
+      BASE_URL: "https://raw.githubusercontent.com/phucphamxuan/video/main/",
+      HEADER_FILE: "header.png",
+      TOTAL_SEGMENTS: 521,
+      MAX_CONCURRENT: 32,        // Tăng lên 32 luồng cho 300Mbps
+      REQUEST_DELAY: 20,         // Giảm delay xuống 20ms
+      RETRY_DELAY: 150,          // Giảm retry delay
+      MAX_RETRIES: 3,
+      INITIAL_BUFFER: 50,        // Tăng buffer ban đầu
+      LOOKAHEAD_BUFFER: 30,      // Tăng lookahead buffer
+      CHUNK_SIZE: 64,            // Xử lý 64 segment một lúc
+      MEMORY_LIMIT: 512 * 1024 * 1024, // 512MB limit
+      PREFETCH_MULTIPLIER: 2     // Prefetch gấp đôi
+    };
+
+    // Advanced state management
+    let videoState = {
+      isLoading: false,
+      isPlaying: false,
+      headerSize: 0,
+      segments: new Map(),           // Dùng Map cho performance tốt hơn
+      bufferedRanges: new Set(),     // Track buffered ranges
+      bufferedCount: 0,
+      currentSegment: 0,
+      totalLoadedBytes: 0,
+      downloadStats: {
+        totalBytes: 0,
+        startTime: 0,
+        successCount: 0,
+        failCount: 0,
+        avgSpeed: 0,
+        peakSpeed: 0
+      },
+      performance: {
+        frameRate: 0,
+        lastFrameTime: 0,
+        frameCount: 0
+      }
+    };
+
+    // Enhanced DOM elements
+    const elements = {
+      playerContainer: document.getElementById('playerContainer'),
+      video: document.getElementById('videoPlayer'),
+      loadingOverlay: document.getElementById('loadingOverlay'),
+      playButton: document.getElementById('playButton'),
+      loadingContent: document.getElementById('loadingContent'),
+      progressFill: document.getElementById('progressFill'),
+      progressText: document.getElementById('progressText'),
+      loadingText: document.getElementById('loadingText'),
+      bufferIndicator: document.getElementById('bufferIndicator'),
+      speedIndicator: document.getElementById('speedIndicator'),
+      errorMessage: document.getElementById('errorMessage'),
+      playPauseBtn: document.getElementById('playPauseBtn'),
+      muteBtn: document.getElementById('muteBtn'),
+      fullscreenBtn: document.getElementById('fullscreenBtn'),
+      timeDisplay: document.getElementById('timeDisplay'),
+      videoProgress: document.getElementById('videoProgress'),
+      videoProgressFill: document.getElementById('videoProgressFill'),
+      bufferProgress: document.getElementById('bufferProgress'),
+      speedStat: document.getElementById('speedStat'),
+      bufferStat: document.getElementById('bufferStat'),
+      timeStat: document.getElementById('timeStat'),
+      performanceOverlay: document.getElementById('performanceOverlay'),
+      cpuUsage: document.getElementById('cpuUsage'),
+      memoryUsage: document.getElementById('memoryUsage'),
+      frameRate: document.getElementById('frameRate')
+    };
+
+    // Performance monitoring
+    let performanceMonitor = {
+      startTime: 0,
+      frameCount: 0,
+      lastUpdate: 0,
+      
+      start() {
+        this.startTime = performance.now();
+        this.monitor();
+      },
+      
+      monitor() {
+        const now = performance.now();
+        this.frameCount++;
+        
+        if (now - this.lastUpdate >= 1000) {
+          const fps = Math.round(this.frameCount * 1000 / (now - this.lastUpdate));
+          elements.frameRate.textContent = fps;
+          
+          // Memory usage
+          if (performance.memory) {
+            const memMB = Math.round(performance.memory.usedJSHeapSize / 1024 / 1024);
+            elements.memoryUsage.textContent = memMB + ' MB';
+          }
+          
+          this.frameCount = 0;
+          this.lastUpdate = now;
+        }
+        
+        requestAnimationFrame(() => this.monitor());
+      }
+    };
+
+    // Utility functions
+    function formatTime(seconds) {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    function formatBytes(bytes) {
+      const mb = bytes / (1024 * 1024);
+      return mb.toFixed(1) + ' MB';
+    }
+
+    function formatSpeed(bytesPerSecond) {
+      const mbps = (bytesPerSecond * 8) / (1024 * 1024);
+      return mbps.toFixed(1) + ' Mbps';
+    }
+
+    // Ultra-fast header loading
+    async function loadHeader() {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
+        const response = await fetch(CONFIG.BASE_URL + CONFIG.HEADER_FILE, {
+          signal: controller.signal,
+          cache: 'force-cache'
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) throw new Error('Không thể tải header');
+        
+        const buffer = await response.arrayBuffer();
+        videoState.headerSize = buffer.byteLength;
+        
+        console.log('Header loaded:', videoState.headerSize, 'bytes');
+        return buffer;
+      } catch (error) {
+        console.error('Lỗi tải header:', error);
+        throw error;
+      }
+    }
+
+    // Ultra-fast segment downloading
+    async function downloadSegment(index, retries = 0) {
+      const filename = `out${index.toString().padStart(3, '0')}.png`;
+      const startTime = performance.now();
+      
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        
+        const response = await fetch(CONFIG.BASE_URL + filename, {
+          signal: controller.signal,
+          cache: 'force-cache'
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const buffer = await response.arrayBuffer();
+        const downloadTime = performance.now() - startTime;
+        const speed = buffer.byteLength / (downloadTime / 1000);
+        
+        // Update stats
+        videoState.downloadStats.totalBytes += buffer.byteLength;
+        videoState.downloadStats.successCount++;
+        videoState.downloadStats.peakSpeed = Math.max(videoState.downloadStats.peakSpeed, speed);
+        
+        // Extract TS data
+        const tsData = buffer.slice(videoState.headerSize);
+        return {
+          data: new Uint8Array(tsData),
+          size: tsData.byteLength,
+          downloadTime: downloadTime,
+          speed: speed
+        };
+        
+      } catch (error) {
+        if (retries < CONFIG.MAX_RETRIES) {
+          await new Promise(resolve => setTimeout(resolve, CONFIG.RETRY_DELAY));
+          return downloadSegment(index, retries + 1);
+        }
+        
+        videoState.downloadStats.failCount++;
+        console.error(`Lỗi tải segment ${index}:`, error);
+        throw error;
+      }
+    }
+
+    // Ultra-fast download manager
+    class UltraFastDownloadManager {
+      constructor() {
+        this.downloadQueue = [];
+        this.priorityQueue = [];
+        this.activeDownloads = new Set();
+        this.completedSegments = new Set();
+        this.isRunning = false;
+        this.workers = [];
+        this.lastUIUpdate = 0;
+      }
+
+      async start() {
+        if (this.isRunning) return;
+        this.isRunning = true;
+        
+        // Tạo priority queue (50 segment đầu)
+        for (let i = 0; i < CONFIG.INITIAL_BUFFER; i++) {
+          this.priorityQueue.push(i);
+        }
+        
+        // Tạo background queue (phần còn lại)
+        for (let i = CONFIG.INITIAL_BUFFER; i < CONFIG.TOTAL_SEGMENTS; i++) {
+          this.downloadQueue.push(i);
+        }
+        
+        // Khởi động 32 workers
+        this.workers = [];
+        for (let i = 0; i < CONFIG.MAX_CONCURRENT; i++) {
+          this.workers.push(this.createWorker(i));
+        }
+        
+        // Khởi động UI updater
+        this.updateUI();
+        
+        await Promise.all(this.workers);
+      }
+
+      async createWorker(workerId) {
+        while (this.isRunning) {
+          // Ưu tiên priority queue
+          let segmentIndex = this.priorityQueue.shift();
+          
+          if (segmentIndex === undefined) {
+            segmentIndex = this.downloadQueue.shift();
+          }
+          
+          if (segmentIndex === undefined) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            continue;
+          }
+          
+          if (this.completedSegments.has(segmentIndex) || this.activeDownloads.has(segmentIndex)) {
+            continue;
+          }
+          
+          this.activeDownloads.add(segmentIndex);
+          
+          try {
+            // Staggered delays cho workers
+            await new Promise(resolve => setTimeout(resolve, workerId * 5));
+            
+            const segmentData = await downloadSegment(segmentIndex);
+            
+            videoState.segments.set(segmentIndex, segmentData.data);
+            videoState.totalLoadedBytes += segmentData.size;
+            this.completedSegments.add(segmentIndex);
+            
+            // Update buffer count
+            this.updateBufferCount();
+            
+            // Adaptive queue management
+            this.manageQueue();
+            
+          } catch (error) {
+            console.error(`Worker ${workerId} failed for segment ${segmentIndex}:`, error);
+          } finally {
+            this.activeDownloads.delete(segmentIndex);
+          }
+        }
+      }
+
+      updateBufferCount() {
+        let count = 0;
+        for (let i = 0; i < CONFIG.TOTAL_SEGMENTS; i++) {
+          if (videoState.segments.has(i)) {
+            count = i + 1;
+          } else {
+            break;
+          }
+        }
+        videoState.bufferedCount = count;
+      }
+
+      manageQueue() {
+        // Adaptive prefetching based on playback position
+        const currentPos = elements.video.currentTime || 0;
+        const duration = elements.video.duration || 1;
+        const estimatedSegment = Math.floor((currentPos / duration) * CONFIG.TOTAL_SEGMENTS);
+        
+        // Add segments around current position to priority queue
+        for (let i = -5; i <= CONFIG.LOOKAHEAD_BUFFER; i++) {
+          const segmentIndex = estimatedSegment + i;
+          if (segmentIndex >= 0 && segmentIndex < CONFIG.TOTAL_SEGMENTS) {
+            if (!this.completedSegments.has(segmentIndex) && !this.priorityQueue.includes(segmentIndex)) {
+              this.priorityQueue.unshift(segmentIndex);
+            }
+          }
