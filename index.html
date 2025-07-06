@@ -133,8 +133,9 @@
     const BASE_URL = "https://raw.githubusercontent.com/phucphamxuan/video/main/";
     const HEADER_FILE = "header.png";
     const TOTAL_SEGMENTS = 521;
-    const MAX_CONCURRENT = 6; // Giới hạn tải đồng thời
+    const MAX_CONCURRENT = 3; // Giảm concurrent để tránh rate limit
     const CHUNK_SIZE = 50; // Xử lý theo batch
+    const RETRY_DELAY = 1000; // Delay giữa các retry
 
     // Cache và state management
     let isLoading = false;
@@ -206,36 +207,59 @@
     }
 
     // Tải segment với retry và timeout
-    async function downloadSegment(index, headerSize) {
+    async function downloadSegment(index, headerSize, retryCount = 0) {
       const filename = `out${index.toString().padStart(3, '0')}.png`;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+      const maxRetries = 3;
+      
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // Giảm timeout xuống 15s
 
-      try {
-        const response = await fetch(BASE_URL + filename, {
-          signal: controller.signal,
-          headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
+        try {
+          // Thêm delay giữa các retry
+          if (attempt > 0) {
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
+            log(`🔄 Thử lại ${filename} (lần ${attempt + 1}/${maxRetries + 1})`);
           }
-        });
-        
-        clearTimeout(timeoutId);
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status} for ${filename}`);
+
+          const response = await fetch(BASE_URL + filename, {
+            signal: controller.signal,
+            headers: {
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache'
+            }
+          });
+          
+          clearTimeout(timeoutId);
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          
+          const buffer = await response.arrayBuffer();
+          
+          // Kiểm tra kích thước file
+          if (buffer.byteLength <= headerSize) {
+            throw new Error(`File quá nhỏ (${buffer.byteLength} bytes)`);
+          }
+          
+          const tsData = buffer.slice(headerSize);
+          
+          totalDownloaded += buffer.byteLength;
+          loadedSegments++;
+          
+          return new Uint8Array(tsData);
+          
+        } catch (error) {
+          clearTimeout(timeoutId);
+          
+          if (attempt === maxRetries) {
+            throw new Error(`${filename}: ${error.message} (sau ${maxRetries + 1} lần thử)`);
+          }
+          
+          // Log retry
+          log(`⚠️ Lỗi ${filename} (lần ${attempt + 1}): ${error.message}`, 'warning');
         }
-        
-        const buffer = await response.arrayBuffer();
-        const tsData = buffer.slice(headerSize);
-        
-        totalDownloaded += buffer.byteLength;
-        loadedSegments++;
-        
-        return new Uint8Array(tsData);
-      } catch (error) {
-        clearTimeout(timeoutId);
-        throw new Error(`Lỗi tải ${filename}: ${error.message}`);
       }
     }
 
@@ -243,26 +267,59 @@
     async function downloadSegmentsBatch(headerSize) {
       const segments = new Array(TOTAL_SEGMENTS).fill(null);
       let currentIndex = 0;
+      let activeDownloads = 0;
+      const maxActive = MAX_CONCURRENT;
       
-      async function processSegment() {
-        while (currentIndex < TOTAL_SEGMENTS && !shouldPause) {
+      return new Promise((resolve) => {
+        async function processNext() {
+          if (shouldPause) {
+            log('⏸️ Tải đã bị tạm dừng');
+            return;
+          }
+          
+          if (currentIndex >= TOTAL_SEGMENTS) {
+            // Đợi các downloads còn lại hoàn thành
+            if (activeDownloads === 0) {
+              resolve(segments.filter(seg => seg !== null));
+            }
+            return;
+          }
+          
           const index = currentIndex++;
+          activeDownloads++;
+          
           try {
             const segment = await downloadSegment(index, headerSize);
             segments[index] = segment;
             updateProgress();
           } catch (error) {
-            log(`⚠️ Bỏ qua segment ${index}: ${error.message}`, 'warning');
-            loadedSegments++; // Vẫn tăng để không bị stuck
+            log(`❌ Không thể tải segment ${index}: ${error.message}`, 'error');
+            // Vẫn tăng loadedSegments để không bị stuck
+            loadedSegments++;
+            updateProgress();
+          }
+          
+          activeDownloads--;
+          
+          // Tiếp tục tải segment tiếp theo
+          setTimeout(processNext, 100); // Thêm delay nhỏ giữa các request
+          
+          // Nếu còn slot trống, bắt đầu download khác
+          if (activeDownloads < maxActive && currentIndex < TOTAL_SEGMENTS) {
+            setTimeout(processNext, 50);
+          }
+          
+          // Kiểm tra xem đã hoàn thành chưa
+          if (currentIndex >= TOTAL_SEGMENTS && activeDownloads === 0) {
+            resolve(segments.filter(seg => seg !== null));
           }
         }
-      }
-
-      // Tạo pool workers
-      const workers = Array(MAX_CONCURRENT).fill().map(() => processSegment());
-      await Promise.all(workers);
-      
-      return segments.filter(seg => seg !== null);
+        
+        // Khởi động các workers ban đầu
+        for (let i = 0; i < Math.min(maxActive, TOTAL_SEGMENTS); i++) {
+          setTimeout(() => processNext(), i * 100);
+        }
+      });
     }
 
     // Ghép segments thành TS
@@ -401,8 +458,29 @@
       }
     });
 
-    // Tự động bắt đầu tải
-    log('🚀 Sẵn sàng tải video. Nhấn "Tải Video" để bắt đầu.');
+    // Tự động bắt đầu kiểm tra kết nối
+    async function checkConnection() {
+      try {
+        log('🔍 Kiểm tra kết nối đến server...');
+        const response = await fetch(BASE_URL + HEADER_FILE, { 
+          method: 'HEAD',
+          cache: 'no-cache'
+        });
+        
+        if (response.ok) {
+          log('✅ Kết nối server thành công!');
+          log('🚀 Sẵn sàng tải video. Nhấn "Tải Video" để bắt đầu.');
+        } else {
+          log('⚠️ Server phản hồi không ổn định. Có thể gặp lỗi khi tải.');
+        }
+      } catch (error) {
+        log('❌ Không thể kết nối đến server. Kiểm tra internet hoặc server có thể đang bảo trì.');
+        log(`Chi tiết lỗi: ${error.message}`);
+      }
+    }
+
+    // Chạy kiểm tra kết nối khi load trang
+    checkConnection();
   </script>
 </body>
 </html>
