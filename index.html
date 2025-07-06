@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Chạy video trá hình từ PNG chứa TS</title>
+</head>
+<body>
+  <h2>🎬 Convert TS (trong PNG) → MP4 ngay trên trình duyệt</h2>
+  <video id="player" width="640" height="360" controls autoplay></video>
+
+  <!-- ✅ Đây là bản chuẩn dùng trong trình duyệt -->
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js"></script>
+
+  <script>
+    // 🧠 FFmpeg gắn trên global `window.FFmpeg`
+    const { createFFmpeg, fetchFile } = window.FFmpeg;
+    const ffmpeg = createFFmpeg({ log: true });
+
+    const BASE_URL = "https://raw.githubusercontent.com/phucphamxuan/video/main/";
+    const HEADER_FILE = "header.png";
+    const SEGMENT = "out000.png"; // Thay đổi tại đây nếu muốn test đoạn khác
+
+    async function main() {
+      const video = document.getElementById("player");
+
+      // 1. Fetch header để tính kích thước
+      const headerRes = await fetch(BASE_URL + HEADER_FILE);
+      const headerBuf = await headerRes.arrayBuffer();
+      const HEADER_SIZE = headerBuf.byteLength;
+      console.log("📦 HEADER_SIZE:", HEADER_SIZE);
+
+      // 2. Fetch PNG chứa TS
+      const res = await fetch(BASE_URL + SEGMENT);
+      const pngBuf = await res.arrayBuffer();
+      const tsBuf = pngBuf.slice(HEADER_SIZE);
+
+      // 3. Load ffmpeg.wasm
+      if (!ffmpeg.isLoaded()) await ffmpeg.load();
+
+      // 4. Ghi file vào hệ thống ảo
+      ffmpeg.FS('writeFile', 'input.ts', new Uint8Array(tsBuf));
+
+      // 5. Convert TS → MP4
+      await ffmpeg.run(
+        '-i', 'input.ts',
+        '-c', 'copy',
+        '-f', 'mp4',
+        '-movflags', 'frag_keyframe+empty_moov',
+        'output.mp4'
+      );
+
+      // 6. Đọc file MP4 đã xử lý
+      const outData = ffmpeg.FS('readFile', 'output.mp4');
+
+      // 7. Tạo Blob và phát
+      const blob = new Blob([outData.buffer], { type: 'video/mp4' });
+      const url = URL.createObjectURL(blob);
+      video.src = url;
+    }
+
+    main();
+  </script>
+</body>
+</html>
