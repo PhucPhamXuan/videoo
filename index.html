@@ -13,7 +13,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js"></script>
 
   <script>
-    const { createFFmpeg, fetchFile } = FFmpeg;
+    const { createFFmpeg, fetchFile } = window.FFmpeg;
     const ffmpeg = createFFmpeg({ log: true });
 
     const BASE_URL = "https://raw.githubusercontent.com/phucphamxuan/video/main/";
