@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>🚀 Tối ưu Video Player từ PNG chứa TS</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f0f0f0;
+    }
+    .container {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    video {
+      width: 100%;
+      max-width: 640px;
+      border-radius: 8px;
+    }
+    .progress-bar {
+      width: 100%;
+      height: 20px;
+      background: #e0e0e0;
+      border-radius: 10px;
+      overflow: hidden;
+      margin: 10px 0;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(45deg, #4CAF50, #2196F3);
+      transition: width 0.3s ease;
+      border-radius: 10px;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      margin: 15px 0;
+    }
+    .stat-item {
+      background: #f8f9fa;
+      padding: 10px;
+      border-radius: 5px;
+      text-align: center;
+      border-left: 4px solid #2196F3;
+    }
+    .controls {
+      margin: 15px 0;
+    }
+    button {
+      background: #2196F3;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      margin-right: 10px;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #1976D2;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .log {
+      background: #f5f5f5;
+      padding: 10px;
+      border-radius: 5px;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🚀 Tối ưu Video Player từ PNG chứa TS</h2>
+    
+    <div class="controls">
+      <button id="loadBtn">📥 Tải Video</button>
+      <button id="pauseBtn" disabled>⏸️ Tạm dừng</button>
+      <button id="resumeBtn" disabled>▶️ Tiếp tục</button>
+      <button id="clearBtn">🗑️ Xóa cache</button>
+    </div>
+
+    <div class="progress-bar">
+      <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+    </div>
+
+    <div class="stats">
+      <div class="stat-item">
+        <strong>Tiến độ</strong><br>
+        <span id="progressText">0/0</span>
+      </div>
+      <div class="stat-item">
+        <strong>Tốc độ</strong><br>
+        <span id="speedText">0 MB/s</span>
+      </div>
+      <div class="stat-item">
+        <strong>Thời gian</strong><br>
+        <span id="timeText">--:--</span>
+      </div>
+      <div class="stat-item">
+        <strong>Dung lượng</strong><br>
+        <span id="sizeText">0 MB</span>
+      </div>
+    </div>
+
+    <video id="player" controls style="display: none;"></video>
+    
+    <div class="log" id="log">📋 Nhật ký hoạt động sẽ hiển thị ở đây...</div>
+  </div>
+
+  <!-- ffmpeg.wasm (UMD) -->
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js"></script>
+
+  <script>
+    const { createFFmpeg, fetchFile } = window.FFmpeg;
+    const ffmpeg = createFFmpeg({ 
+      log: true,
+      corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.10.0/dist/ffmpeg-core.js'
+    });
+
+    const BASE_URL = "https://raw.githubusercontent.com/phucphamxuan/video/main/";
+    const HEADER_FILE = "header.png";
+    const TOTAL_SEGMENTS = 521;
+    const MAX_CONCURRENT = 6; // Giới hạn tải đồng thời
+    const CHUNK_SIZE = 50; // Xử lý theo batch
+
+    // Cache và state management
+    let isLoading = false;
+    let shouldPause = false;
+    let loadedSegments = 0;
+    let startTime = 0;
+    let totalDownloaded = 0;
+    
+    // Elements
+    const elements = {
+      log: document.getElementById("log"),
+      video: document.getElementById("player"),
+      progressFill: document.getElementById("progressFill"),
+      progressText: document.getElementById("progressText"),
+      speedText: document.getElementById("speedText"),
+      timeText: document.getElementById("timeText"),
+      sizeText: document.getElementById("sizeText"),
+      loadBtn: document.getElementById("loadBtn"),
+      pauseBtn: document.getElementById("pauseBtn"),
+      resumeBtn: document.getElementById("resumeBtn"),
+      clearBtn: document.getElementById("clearBtn")
+    };
+
+    // Logging với timestamp
+    function log(message, type = 'info') {
+      const timestamp = new Date().toLocaleTimeString();
+      const logEntry = `[${timestamp}] ${message}`;
+      elements.log.innerHTML += logEntry + '\n';
+      elements.log.scrollTop = elements.log.scrollHeight;
+      console.log(logEntry);
+    }
+
+    // Cập nhật progress
+    function updateProgress() {
+      const progress = (loadedSegments / TOTAL_SEGMENTS) * 100;
+      elements.progressFill.style.width = progress + '%';
+      elements.progressText.textContent = `${loadedSegments}/${TOTAL_SEGMENTS}`;
+      
+      // Tính tốc độ
+      const elapsed = (Date.now() - startTime) / 1000;
+      const speed = elapsed > 0 ? (totalDownloaded / elapsed / 1024 / 1024).toFixed(2) : 0;
+      elements.speedText.textContent = `${speed} MB/s`;
+      
+      // Thời gian đã trôi qua
+      const minutes = Math.floor(elapsed / 60);
+      const seconds = Math.floor(elapsed % 60);
+      elements.timeText.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+      
+      // Dung lượng
+      elements.sizeText.textContent = `${(totalDownloaded / 1024 / 1024).toFixed(2)} MB`;
+    }
+
+    // Tải header với retry
+    async function loadHeader() {
+      for (let retry = 0; retry < 3; retry++) {
+        try {
+          log(`📥 Tải header... (lần thử ${retry + 1})`);
+          const response = await fetch(BASE_URL + HEADER_FILE);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const buffer = await response.arrayBuffer();
+          log(`✅ Header tải thành công (${buffer.byteLength} bytes)`);
+          return buffer;
+        } catch (error) {
+          log(`❌ Lỗi tải header (lần ${retry + 1}): ${error.message}`, 'error');
+          if (retry === 2) throw error;
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+    }
+
+    // Tải segment với retry và timeout
+    async function downloadSegment(index, headerSize) {
+      const filename = `out${index.toString().padStart(3, '0')}.png`;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+      try {
+        const response = await fetch(BASE_URL + filename, {
+          signal: controller.signal,
+          headers: {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
+          }
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status} for ${filename}`);
+        }
+        
+        const buffer = await response.arrayBuffer();
+        const tsData = buffer.slice(headerSize);
+        
+        totalDownloaded += buffer.byteLength;
+        loadedSegments++;
+        
+        return new Uint8Array(tsData);
+      } catch (error) {
+        clearTimeout(timeoutId);
+        throw new Error(`Lỗi tải ${filename}: ${error.message}`);
+      }
+    }
+
+    // Tải segments theo batch với concurrency limit
+    async function downloadSegmentsBatch(headerSize) {
+      const segments = new Array(TOTAL_SEGMENTS).fill(null);
+      let currentIndex = 0;
+      
+      async function processSegment() {
+        while (currentIndex < TOTAL_SEGMENTS && !shouldPause) {
+          const index = currentIndex++;
+          try {
+            const segment = await downloadSegment(index, headerSize);
+            segments[index] = segment;
+            updateProgress();
+          } catch (error) {
+            log(`⚠️ Bỏ qua segment ${index}: ${error.message}`, 'warning');
+            loadedSegments++; // Vẫn tăng để không bị stuck
+          }
+        }
+      }
+
+      // Tạo pool workers
+      const workers = Array(MAX_CONCURRENT).fill().map(() => processSegment());
+      await Promise.all(workers);
+      
+      return segments.filter(seg => seg !== null);
+    }
+
+    // Ghép segments thành TS
+    function combineSegments(segments) {
+      log('🔗 Đang ghép các segments...');
+      const totalLength = segments.reduce((sum, seg) => sum + seg.length, 0);
+      const combined = new Uint8Array(totalLength);
+      
+      let offset = 0;
+      for (const segment of segments) {
+        combined.set(segment, offset);
+        offset += segment.length;
+      }
+      
+      log(`✅ Ghép hoàn thành: ${(totalLength / 1024 / 1024).toFixed(2)} MB`);
+      return combined;
+    }
+
+    // Convert TS to MP4
+    async function convertToMP4(tsData) {
+      log('🧠 Đang load ffmpeg...');
+      
+      if (!ffmpeg.isLoaded()) {
+        await ffmpeg.load();
+      }
+      
+      log('📝 Ghi file input.ts vào FS ảo...');
+      ffmpeg.FS('writeFile', 'input.ts', tsData);
+      
+      log('🔄 Chuyển TS → MP4...');
+      await ffmpeg.run(
+        '-i', 'input.ts',
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-bsf:a', 'aac_adtstoasc',
+        '-f', 'mp4',
+        '-movflags', 'frag_keyframe+empty_moov',
+        'output.mp4'
+      );
+      
+      log('📤 Đọc file output.mp4');
+      const mp4Data = ffmpeg.FS('readFile', 'output.mp4');
+      
+      // Dọn dẹp
+      ffmpeg.FS('unlink', 'input.ts');
+      ffmpeg.FS('unlink', 'output.mp4');
+      
+      return mp4Data;
+    }
+
+    // Main loading function
+    async function loadVideo() {
+      if (isLoading) return;
+      
+      isLoading = true;
+      shouldPause = false;
+      loadedSegments = 0;
+      totalDownloaded = 0;
+      startTime = Date.now();
+      
+      elements.loadBtn.disabled = true;
+      elements.pauseBtn.disabled = false;
+      elements.resumeBtn.disabled = true;
+      elements.video.style.display = 'none';
+      
+      try {
+        // Load header
+        const headerBuffer = await loadHeader();
+        const headerSize = headerBuffer.byteLength;
+        
+        // Load segments
+        log('📦 Bắt đầu tải segments...');
+        const segments = await downloadSegmentsBatch(headerSize);
+        
+        if (shouldPause) {
+          log('⏸️ Đã tạm dừng');
+          return;
+        }
+        
+        // Combine segments
+        const combinedTS = combineSegments(segments);
+        
+        // Convert to MP4
+        const mp4Data = await convertToMP4(combinedTS);
+        
+        // Create video URL
+        const blob = new Blob([mp4Data.buffer], { type: 'video/mp4' });
+        const url = URL.createObjectURL(blob);
+        
+        elements.video.src = url;
+        elements.video.style.display = 'block';
+        
+        log('✅ Video đã sẵn sàng để phát!');
+        
+      } catch (error) {
+        log(`❌ Lỗi: ${error.message}`, 'error');
+      } finally {
+        isLoading = false;
+        elements.loadBtn.disabled = false;
+        elements.pauseBtn.disabled = true;
+        elements.resumeBtn.disabled = true;
+      }
+    }
+
+    // Event listeners
+    elements.loadBtn.addEventListener('click', loadVideo);
+    
+    elements.pauseBtn.addEventListener('click', () => {
+      shouldPause = true;
+      elements.pauseBtn.disabled = true;
+      elements.resumeBtn.disabled = false;
+      log('⏸️ Đã tạm dừng tải');
+    });
+    
+    elements.resumeBtn.addEventListener('click', () => {
+      shouldPause = false;
+      elements.pauseBtn.disabled = false;
+      elements.resumeBtn.disabled = true;
+      log('▶️ Tiếp tục tải');
+    });
+    
+    elements.clearBtn.addEventListener('click', () => {
+      // Reset tất cả
+      elements.video.src = '';
+      elements.video.style.display = 'none';
+      elements.log.innerHTML = '📋 Đã xóa cache và reset...\n';
+      elements.progressFill.style.width = '0%';
+      elements.progressText.textContent = '0/0';
+      elements.speedText.textContent = '0 MB/s';
+      elements.timeText.textContent = '--:--';
+      elements.sizeText.textContent = '0 MB';
+      
+      // Clear URL objects
+      if (elements.video.src) {
+        URL.revokeObjectURL(elements.video.src);
+      }
+    });
+
+    // Tự động bắt đầu tải
+    log('🚀 Sẵn sàng tải video. Nhấn "Tải Video" để bắt đầu.');
+  </script>
+</body>
+</html>
