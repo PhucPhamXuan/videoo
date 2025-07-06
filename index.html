@@ -344,12 +344,12 @@
       BASE_URL: "https://raw.githubusercontent.com/phucphamxuan/video/main/",
       HEADER_FILE: "header.png",
       TOTAL_SEGMENTS: 521,
-      MAX_CONCURRENT: 16,        // Tăng lên 16 luồng
-      REQUEST_DELAY: 50,         // Giảm delay xuống 50ms
-      RETRY_DELAY: 300,
-      MAX_RETRIES: 2,
-      INITIAL_BUFFER: 30,        // Tải 30 segment đầu để phát
-      LOOKAHEAD_BUFFER: 20       // Tải trước 20 segment
+      MAX_CONCURRENT: 32,        // Tăng lên 16 luồng
+      REQUEST_DELAY: 10,         // Giảm delay xuống 50ms
+      RETRY_DELAY: 200,
+      MAX_RETRIES: 3,
+      INITIAL_BUFFER: 60,        // Tải 30 segment đầu để phát
+      LOOKAHEAD_BUFFER: 40       // Tải trước 20 segment
     };
 
     // State quản lý
