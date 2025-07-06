@@ -2,63 +2,93 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Chạy video trá hình từ PNG chứa TS</title>
+  <title>🎬 Chạy video từ PNG chứa TS</title>
 </head>
 <body>
-  <h2>🎬 Convert TS (trong PNG) → MP4 ngay trên trình duyệt</h2>
+  <h2>📦 Convert từ PNG → TS → MP4 và phát</h2>
   <video id="player" width="640" height="360" controls autoplay></video>
+  <p id="log">⏳ Đang tải...</p>
 
-  <!-- ✅ Đây là bản chuẩn dùng trong trình duyệt -->
-  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js"></script>
+  <!-- ffmpeg.wasm (UMD) -->
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/umd/ffmpeg.min.js"></script>
 
   <script>
-    // 🧠 FFmpeg gắn trên global `window.FFmpeg`
-    const { createFFmpeg, fetchFile } = window.FFmpeg;
+    const { createFFmpeg, fetchFile } = FFmpeg;
     const ffmpeg = createFFmpeg({ log: true });
 
     const BASE_URL = "https://raw.githubusercontent.com/phucphamxuan/video/main/";
     const HEADER_FILE = "header.png";
-    const SEGMENT = "out000.png"; // Thay đổi tại đây nếu muốn test đoạn khác
+    const TOTAL_SEGMENTS = 521; // từ out000 → out520
+
+    async function downloadAndExtractTS(segmentIndex, headerSize) {
+      const filename = `out${segmentIndex.toString().padStart(3, '0')}.png`;
+      const res = await fetch(BASE_URL + filename);
+      if (!res.ok) throw new Error(`❌ Lỗi tải ${filename}`);
+      const buf = await res.arrayBuffer();
+      return buf.slice(headerSize);
+    }
 
     async function main() {
+      const log = msg => document.getElementById("log").innerText = msg;
       const video = document.getElementById("player");
 
-      // 1. Fetch header để tính kích thước
+      log("📥 Tải header...");
       const headerRes = await fetch(BASE_URL + HEADER_FILE);
       const headerBuf = await headerRes.arrayBuffer();
       const HEADER_SIZE = headerBuf.byteLength;
-      console.log("📦 HEADER_SIZE:", HEADER_SIZE);
+      console.log("📏 HEADER_SIZE =", HEADER_SIZE);
 
-      // 2. Fetch PNG chứa TS
-      const res = await fetch(BASE_URL + SEGMENT);
-      const pngBuf = await res.arrayBuffer();
-      const tsBuf = pngBuf.slice(HEADER_SIZE);
+      // Tải và nối tất cả các đoạn TS
+      const tsParts = [];
+      for (let i = 0; i < TOTAL_SEGMENTS; i++) {
+        log(`📦 Đang tải out${i.toString().padStart(3, '0')}.png (${i + 1}/${TOTAL_SEGMENTS})`);
+        try {
+          const ts = await downloadAndExtractTS(i, HEADER_SIZE);
+          tsParts.push(new Uint8Array(ts));
+        } catch (e) {
+          console.warn(e.message);
+        }
+      }
 
-      // 3. Load ffmpeg.wasm
+      // Gộp thành 1 file TS duy nhất
+      const totalLength = tsParts.reduce((sum, part) => sum + part.length, 0);
+      const combined = new Uint8Array(totalLength);
+      let offset = 0;
+      for (const part of tsParts) {
+        combined.set(part, offset);
+        offset += part.length;
+      }
+
+      log("🧠 Đang load ffmpeg...");
       if (!ffmpeg.isLoaded()) await ffmpeg.load();
 
-      // 4. Ghi file vào hệ thống ảo
-      ffmpeg.FS('writeFile', 'input.ts', new Uint8Array(tsBuf));
+      log("📝 Ghi file input.ts vào FS ảo...");
+      ffmpeg.FS('writeFile', 'input.ts', combined);
 
-      // 5. Convert TS → MP4
+      log("🔄 Chuyển TS → MP4...");
       await ffmpeg.run(
         '-i', 'input.ts',
-        '-c', 'copy',
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-bsf:a', 'aac_adtstoasc',
         '-f', 'mp4',
         '-movflags', 'frag_keyframe+empty_moov',
         'output.mp4'
       );
 
-      // 6. Đọc file MP4 đã xử lý
-      const outData = ffmpeg.FS('readFile', 'output.mp4');
-
-      // 7. Tạo Blob và phát
-      const blob = new Blob([outData.buffer], { type: 'video/mp4' });
+      log("📤 Đọc file output.mp4");
+      const mp4Data = ffmpeg.FS('readFile', 'output.mp4');
+      const blob = new Blob([mp4Data.buffer], { type: 'video/mp4' });
       const url = URL.createObjectURL(blob);
+
       video.src = url;
+      log("✅ Phát video thành công!");
     }
 
-    main();
+    main().catch(err => {
+      document.getElementById("log").innerText = "❌ Lỗi: " + err.message;
+      console.error(err);
+    });
   </script>
 </body>
 </html>
